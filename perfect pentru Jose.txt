@@ -1,0 +1,231 @@
+--[[
+    800-BOT DISTRIBUTED SYSTEM - External Coordinator Version
+    Zero collisions guaranteed with smart load balancing
+]]
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(2)
+
+pcall(function() 
+    setfpscap(15)
+    game:GetService("RunService"):Set3dRenderingEnabled(false) 
+end)
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+
+while not LocalPlayer do 
+    LocalPlayer = Players.LocalPlayer
+    task.wait(0.1) 
+end
+
+if _G.BotRunning then 
+    print("[SKIP] Bot already running")
+    return 
+end
+_G.BotRunning = true
+
+-- ==================== CONFIGURATION ====================
+local COORDINATOR_URL = "http://192.168.1.251:5000" -- CHANGE THIS
+local DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1466840930915979546/ACoGRUx0o9QGI8J0O3G1tIA55TOGddk9dD5HyWc6BPk4Lmt1eZ-dnDS2aQ15Jh7dUdwd"
+local PLACE_ID = 109983668079237
+local JOB_ID = game.JobId
+local BOT_ID = LocalPlayer.Name .. "_" .. tostring(os.time() % 100000)
+
+-- ==================== HTTP SETUP ====================
+local httpRequest = syn and syn.request or http_request or request or http and http.request
+
+if not httpRequest then
+    error("[CRITICAL] No HTTP request function available!")
+end
+
+local function httpPost(url, data)
+    local body = HttpService:JSONEncode(data)
+    local success, response = pcall(function()
+        return httpRequest({
+            Url = url,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = body
+        })
+    end)
+    
+    if success and response and response.StatusCode == 200 then
+        return HttpService:JSONDecode(response.Body)
+    else
+        return nil
+    end
+end
+
+local function httpGet(url)
+    local success, response = pcall(function()
+        return httpRequest({
+            Url = url,
+            Method = "GET"
+        })
+    end)
+    
+    if success and response and response.StatusCode == 200 then
+        return HttpService:JSONDecode(response.Body)
+    else
+        return nil
+    end
+end
+
+local function sendDiscord(msg)
+    pcall(function()
+        httpRequest({
+            Url = DISCORD_WEBHOOK,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode({content = msg})
+        })
+    end)
+end
+
+-- ==================== COORDINATOR CLIENT ====================
+local function requestServerFromCoordinator()
+    print("[COORD] Requesting server...")
+    
+    local result = httpPost(COORDINATOR_URL .. "/request-server", {
+        bot_id = BOT_ID,
+        current_server = JOB_ID
+    })
+    
+    if result and result.server_id then
+        print("[COORD] Assigned: " .. result.server_id:sub(1,8))
+        return result.server_id, result.expires_in
+    else
+        print("[COORD] No server available, waiting...")
+        return nil, nil
+    end
+end
+
+local function sendHeartbeat(serverId, found)
+    pcall(function()
+        httpPost(COORDINATOR_URL .. "/heartbeat", {
+            bot_id = BOT_ID,
+            server_id = serverId,
+            found = found or 0
+        })
+    end)
+end
+
+local function releaseServer(serverId)
+    pcall(function()
+        httpPost(COORDINATOR_URL .. "/release", {
+            bot_id = BOT_ID,
+            server_id = serverId
+        })
+    end)
+end
+
+-- ==================== SCANNER ====================
+local function scanForSecrets()
+    print("[SCAN] Starting...")
+    local foundCount = 0
+    
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then 
+        print("[SCAN] No Plots")
+        return 0 
+    end
+    
+    local Animals = nil
+    pcall(function()
+        Animals = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+    end)
+    
+    if not Animals then return 0 end
+    
+    for _, plot in pairs(plots:GetChildren()) do
+        for _, obj in pairs(plot:GetChildren()) do
+            if obj:IsA("Model") and obj.Name ~= "FriendPanel" and obj.Name ~= "CashPad" then
+                local data = Animals[obj.Name] or Animals[obj.Name:gsub("^%w+%s+", "")]
+                if data and data.Rarity == "Secret" and data.Generation and data.Generation >= 10000000 then
+                    foundCount = foundCount + 1
+                    sendDiscord(string.format("**💎 %s** | **%s/s** | Bot: `%s` | Server: `%s`", 
+                        obj.Name, tostring(data.Generation), BOT_ID, JOB_ID:sub(1,8)))
+                end
+            end
+        end
+    end
+    
+    return foundCount
+end
+
+-- ==================== MAIN EXECUTION ====================
+print("[START] Bot " .. BOT_ID .. " | Server: " .. JOB_ID:sub(1,8))
+
+-- 1. Scan current server
+local found = scanForSecrets()
+
+-- 2. Send heartbeat (claims current server implicitly)
+sendHeartbeat(JOB_ID, found)
+
+-- 3. Request next server from coordinator
+local nextServer, expiresIn = nil, nil
+local attempts = 0
+
+repeat
+    nextServer, expiresIn = requestServerFromCoordinator()
+    attempts = attempts + 1
+    if not nextServer then
+        task.wait(5) -- Wait 5s before retry
+    end
+until nextServer or attempts >= 10
+
+if not nextServer then
+    print("[CRITICAL] Coordinator failed, entering fallback mode...")
+    sendDiscord("⚠️ `" .. BOT_ID .. "` coordinator failed, using fallback")
+    -- Fallback: Just teleport randomly (will have collisions but rare)
+    _G.BotRunning = nil
+    TeleportService:Teleport(PLACE_ID, LocalPlayer)
+    return
+end
+
+-- 4. Release current server early (optimization)
+releaseServer(JOB_ID)
+
+-- 5. Send final heartbeat before hop
+sendHeartbeat(JOB_ID, found)
+
+-- 6. Prepare for teleport
+task.wait(1)
+_G.BotRunning = nil
+
+print("[HOP] To " .. nextServer:sub(1,8))
+
+-- Setup teleport failure handler
+TeleportService.TeleportInitFailed:Connect(function(player, result, err)
+    if player ~= LocalPlayer then return end
+    
+    print("[TELEPORT FAIL] " .. tostring(err))
+    -- Tell coordinator we failed so it can reassign
+    releaseServer(nextServer)
+    
+    task.wait(2)
+    -- Try to get new server
+    local retryServer = requestServerFromCoordinator()
+    if retryServer then
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, retryServer, LocalPlayer)
+    else
+        TeleportService:Teleport(PLACE_ID, LocalPlayer)
+    end
+end)
+
+-- Execute teleport
+local success, err = pcall(function()
+    TeleportService:TeleportToPlaceInstance(PLACE_ID, nextServer, LocalPlayer)
+end)
+
+if not success then
+    print("[ERROR] Teleport failed: " .. tostring(err))
+    releaseServer(nextServer)
+    task.wait(3)
+    TeleportService:Teleport(PLACE_ID, LocalPlayer)
+end
