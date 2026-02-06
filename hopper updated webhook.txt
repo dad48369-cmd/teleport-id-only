@@ -1,0 +1,396 @@
+--[[
+    FINAL - Secret 10M+ Finder with Fast Random Hop + Proxy Support
+    Cloud Joiner Edition - Lunar Style Template
+    Place ID: 109983668079237
+]]
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(2)
+
+pcall(function() 
+    setfpscap(15)
+    game:GetService("RunService"):Set3dRenderingEnabled(false) 
+end)
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+
+while not LocalPlayer do task.wait(0.1) end
+if _G.BotRunning then return end
+_G.BotRunning = true
+
+-- CONFIGURATION - Add your proxies here
+local PROXIES = {
+    "http://r08ckvvpewe9q6j-country-any:8EA3JqY0mv2wQH6@resi.rainproxy.io:9090",
+           "http://r08ckvvpewe9q6j-country-any:8EA3JqY0mv2wQH6@resi.rainproxy.io:9090",
+           "http://r08ckvvpewe9q6j-country-any:8EA3JqY0mv2wQH6@resi.rainproxy.io:9090",
+}
+
+local CURRENT_PROXY_INDEX = 1
+
+local function rotateProxy()
+    CURRENT_PROXY_INDEX = CURRENT_PROXY_INDEX % #PROXIES + 1
+    return PROXIES[CURRENT_PROXY_INDEX]
+end
+
+local function getCurrentProxy()
+    if #PROXIES == 0 or PROXIES[1] == "http://proxy1:port" then
+        return nil
+    end
+    return PROXIES[CURRENT_PROXY_INDEX]
+end
+
+local WEBHOOK = "https://discord.com/api/webhooks/1466840930915979546/ACoGRUx0o9QGI8J0O3G1tIA55TOGddk9dD5HyWc6BPk4Lmt1eZ-dnDS2aQ15Jh7dUdwd"
+local PLACE_ID = 109983668079237
+local JOB_ID = game.JobId
+local PLAYER_COUNT = #Players:GetPlayers()
+local MAX_PLAYERS = Players.MaxPlayers
+
+local httpRequest = syn and syn.request or http_request or request
+local Animals = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+
+-- BRAINROT IMAGE DATABASE - Add Discord direct image URLs here
+-- Upload images to Discord and copy the direct link (must end in .png/.jpg/.webp)
+local BRAINROT_IMAGES = {
+    -- Format: ["Exact Brainrot Name"] = "https://cdn.discordapp.com/attachments/.../image.png",
+    ["Los Candies"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/los_candies.png",
+    ["Spinny Hammy"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/spinny_hammy.png", 
+    ["Esok Sekolah"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/esok_sekolah.png",
+    ["Los Combinasionas"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/los_combinasionas.png",
+    ["Bacuru and Egguru"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/bacuru_egguru.png",
+    ["Swag Soda"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/swag_soda.png",
+    ["La Grande Combinasion"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/la_grande_combinasion.png",
+    ["La Secret Combinasion"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/la_secret_combinasion.png",
+    ["Spaghetti Tualetti"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/spaghetti_tualetti.png",
+    ["Mi Gatito"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/mi_gatito.png",
+    ["Taco"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/taco.png",
+    ["Nyan"] = "https://cdn.discordapp.com/attachments/PLACEHOLDER/nyan.png",
+    
+    -- Add more brainrot images here as you upload them to Discord
+}
+
+-- Cloud Joiner branding assets (upload these to Discord too)
+local CLOUD_JOINER_AVATAR = "https://cdn.discordapp.com/attachments/PLACEHOLDER/cloud_joiner_logo.png"
+local CLOUD_EMOJI = "☁️"
+local DNA_EMOJI = "🧬"
+
+local function getBrainrotImage(brainrotName)
+    -- Try exact match first
+    if BRAINROT_IMAGES[brainrotName] then
+        return BRAINROT_IMAGES[brainrotName]
+    end
+    
+    -- Try matching without prefixes
+    local cleanName = brainrotName:gsub("^The%s+", ""):gsub("^Los%s+", ""):gsub("^La%s+", "")
+    if BRAINROT_IMAGES[cleanName] then
+        return BRAINROT_IMAGES[cleanName]
+    end
+    
+    -- Try partial match
+    for name, url in pairs(BRAINROT_IMAGES) do
+        if brainrotName:find(name) or name:find(brainrotName) then
+            return url
+        end
+    end
+    
+    return nil -- Return nil if no image found
+end
+
+-- Try to get ingredients/components from the animal data
+local function getIngredients(animalName, animalData)
+    -- This depends on your game's data structure
+    -- Common patterns: Ingredients, Recipe, Components, Requires, etc.
+    local ingredients = {}
+    
+    if animalData.Ingredients then
+        for _, ing in ipairs(animalData.Ingredients) do
+            table.insert(ingredients, ing)
+        end
+    elseif animalData.Recipe then
+        for _, ing in ipairs(animalData.Recipe) do
+            table.insert(ingredients, ing)
+        end
+    elseif animalData.Requires then
+        for _, ing in ipairs(animalData.Requires) do
+            table.insert(ingredients, ing)
+        end
+    end
+    
+    return ingredients
+end
+
+-- Proxy-enabled request function
+local function proxyRequest(options)
+    if not httpRequest then return nil end
+    
+    local proxy = getCurrentProxy()
+    if proxy then
+        options.Headers = options.Headers or {}
+        options.Headers["Proxy-Authorization"] = proxy
+        options.Proxy = proxy
+    end
+    
+    local success, response = pcall(function()
+        return httpRequest(options)
+    end)
+    
+    if not success or (response and response.StatusCode and response.StatusCode == 429) then
+        if #PROXIES > 1 then
+            rotateProxy()
+            proxy = getCurrentProxy()
+            options.Proxy = proxy
+            options.Headers = options.Headers or {}
+            options.Headers["Proxy-Authorization"] = proxy
+            success, response = pcall(function()
+                return httpRequest(options)
+            end)
+        end
+    end
+    
+    return success and response or nil
+end
+
+local function formatNum(n)
+    if n >= 1e9 then return string.format("%.2fB", n/1e9)
+    elseif n >= 1e6 then return string.format("%.0fM", n/1e6)
+    elseif n >= 1e3 then return string.format("%.0fK", n/1e3)
+    else return tostring(n) end
+end
+
+-- Lunar Notifier style webhook with Cloud Joiner branding
+local function sendCloudJoinerNotification(itemName, generationRate, rarity, animalData, isBest)
+    local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    local imageUrl = getBrainrotImage(itemName)
+    local formattedRate = formatNum(generationRate)
+    
+    -- Determine color based on value (red/orange gradient like Lunar)
+    local color = 15158332 -- Default red
+    if generationRate >= 1000000000 then
+        color = 16748800 -- Bright orange for 1B+
+    elseif generationRate >= 500000000 then
+        color = 16023505 -- Red-orange for 500M+
+    elseif generationRate >= 100000000 then
+        color = 15158332 -- Red for 100M+
+    elseif generationRate >= 10000000 then
+        color = 12390624 -- Dark red for 10M+
+    end
+    
+    -- Build description in Lunar style
+    local description = ""
+    
+    -- Title line with lightning bolt for high values
+    if generationRate >= 1000000000 then
+        description = description .. string.format("⚡ **%s** — $%s/s\\n\\n", itemName, formattedRate)
+    else
+        description = description .. string.format("💎 **%s** — $%s/s\\n\\n", itemName, formattedRate)
+    end
+    
+    -- SECRET line with stars
+    description = description .. "⭐ --- **SECRET** --- ⭐\\n\\n"
+    
+    -- Item info line
+    description = description .. string.format("**%s** • $%s/s\\n", itemName, formattedRate)
+    
+    -- Ingredients/DNA line
+    local ingredients = getIngredients(itemName, animalData)
+    if #ingredients > 0 then
+        local ingString = table.concat(ingredients, ", ")
+        description = description .. string.format("%s %s\\n\\n", DNA_EMOJI, ingString)
+    else
+        description = description .. "\\n"
+    end
+    
+    -- Players
+    description = description .. string.format("👥 **Players:** %d", PLAYER_COUNT)
+    
+    local embed = {
+        ["title"] = isBest and string.format("%s Cloud Joiner — 🏆 BEST FIND!", CLOUD_EMOJI) or string.format("%s Cloud Joiner", CLOUD_EMOJI),
+        ["description"] = description,
+        ["color"] = color,
+        ["thumbnail"] = imageUrl and {
+            ["url"] = imageUrl
+        } or nil,
+        ["footer"] = {
+            ["text"] = string.format("Cloud Joiner | Today at %s", os.date("%I:%M %p")),
+            ["icon_url"] = CLOUD_JOINER_AVATAR
+        },
+        ["timestamp"] = timestamp
+    }
+    
+    local body = HttpService:JSONEncode({
+        ["username"] = "Cloud Joiner",
+        ["avatar_url"] = CLOUD_JOINER_AVATAR,
+        ["embeds"] = {embed}
+    })
+    
+    proxyRequest({
+        Url = WEBHOOK, 
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = body
+    })
+end
+
+-- SCAN FOR SECRETS 10M+
+local foundCount = 0
+local plots = Workspace:FindFirstChild("Plots")
+local foundItems = {}
+local bestItem = nil
+local bestRate = 0
+
+if plots then
+    for _, plot in pairs(plots:GetChildren()) do
+        for _, obj in pairs(plot:GetChildren()) do
+            if obj:IsA("Model") and obj.Name ~= "FriendPanel" and obj.Name ~= "CashPad" then
+                local data = Animals[obj.Name] or Animals[obj.Name:gsub("^%w+%s+", "")]
+                if data and data.Rarity == "Secret" and data.Generation and data.Generation >= 10000000 then
+                    foundCount = foundCount + 1
+                    
+                    local itemData = {
+                        name = obj.Name,
+                        rate = data.Generation,
+                        rarity = data.Rarity,
+                        data = data
+                    }
+                    table.insert(foundItems, itemData)
+                    
+                    -- Track best item
+                    if data.Generation > bestRate then
+                        bestRate = data.Generation
+                        bestItem = itemData
+                    end
+                    
+                    sendCloudJoinerNotification(obj.Name, data.Generation, data.Rarity, data, false)
+                    task.wait(0.5)
+                end
+            end
+        end
+    end
+end
+
+-- Send special notification for BEST brainrot found
+if bestItem then
+    task.wait(1)
+    local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    local bestImageUrl = getBrainrotImage(bestItem.name)
+    local formattedRate = formatNum(bestItem.rate)
+    
+    -- Best item embed with larger image
+    local bestDescription = ""
+    bestDescription = bestDescription .. string.format("👑 **BEST BRAINROT FOUND!**\\n\\n")
+    bestDescription = bestDescription .. string.format("⚡ **%s** — $%s/s\\n\\n", bestItem.name, formattedRate)
+    bestDescription = bestDescription .. "⭐ --- **SECRET** --- ⭐\\n\\n"
+    bestDescription = bestDescription .. string.format("**%s** • $%s/s\\n", bestItem.name, formattedRate)
+    
+    local ingredients = getIngredients(bestItem.name, bestItem.data)
+    if #ingredients > 0 then
+        local ingString = table.concat(ingredients, ", ")
+        bestDescription = bestDescription .. string.format("%s %s\\n\\n", DNA_EMOJI, ingString)
+    else
+        bestDescription = bestDescription .. "\\n"
+    end
+    
+    bestDescription = bestDescription .. string.format("👥 **Players:** %d | **Total Found:** %d", PLAYER_COUNT, foundCount)
+    
+    local bestEmbed = {
+        ["title"] = string.format("%s Cloud Joiner — 👑 BEST FIND!", CLOUD_EMOJI),
+        ["description"] = bestDescription,
+        ["color"] = 16748800, -- Bright orange for best
+        ["thumbnail"] = bestImageUrl and {
+            ["url"] = bestImageUrl
+        } or nil,
+        ["image"] = bestImageUrl and {
+            ["url"] = bestImageUrl
+        } or nil, -- Large image at bottom too
+        ["footer"] = {
+            ["text"] = string.format("Cloud Joiner | Today at %s", os.date("%I:%M %p")),
+            ["icon_url"] = CLOUD_JOINER_AVATAR
+        },
+        ["timestamp"] = timestamp
+    }
+    
+    local body = HttpService:JSONEncode({
+        ["username"] = "Cloud Joiner",
+        ["avatar_url"] = CLOUD_JOINER_AVATAR,
+        ["embeds"] = {bestEmbed}
+    })
+    
+    proxyRequest({
+        Url = WEBHOOK, 
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = body
+    })
+end
+
+-- RANDOM SERVER HOP
+task.wait(2)
+_G.BotRunning = nil
+
+local serverList = {}
+local success, err = pcall(function()
+    local url = "https://games.roblox.com/v1/games/"..PLACE_ID.."/servers/Public?limit=100"
+    local response = proxyRequest({Url=url, Method="GET"})
+    if response and response.Body then
+        local data = HttpService:JSONDecode(response.Body)
+        if data.data then
+            for _, s in ipairs(data.data) do
+                if s.id ~= JOB_ID then
+                    table.insert(serverList, s.id)
+                end
+            end
+        end
+    end
+end)
+
+if not success or #serverList == 0 then
+    pcall(function()
+        local url = "https://games.roblox.com/v1/games/"..PLACE_ID.."/servers/Public?limit=100"
+        local response = httpRequest({Url=url, Method="GET"})
+        if response and response.Body then
+            local data = HttpService:JSONDecode(response.Body)
+            if data.data then
+                for _, s in ipairs(data.data) do
+                    if s.id ~= JOB_ID then
+                        table.insert(serverList, s.id)
+                    end
+                end
+            end
+        end
+    end)
+end
+
+for i = #serverList, 2, -1 do
+    local j = math.random(1, i)
+    serverList[i], serverList[j] = serverList[j], serverList[i]
+end
+
+local index = 1
+TeleportService.TeleportInitFailed:Connect(function(player, result, err)
+    if player == LocalPlayer then
+        index = index + 1
+        if index <= #serverList then
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(PLACE_ID, serverList[index], LocalPlayer)
+            end)
+        else
+            pcall(function()
+                TeleportService:Teleport(PLACE_ID, LocalPlayer)
+            end)
+        end
+    end
+end)
+
+if #serverList > 0 then
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(PLACE_ID, serverList[1], LocalPlayer)
+    end)
+else
+    pcall(function()
+        TeleportService:Teleport(PLACE_ID, LocalPlayer)
+    end)
+end
